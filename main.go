@@ -18,7 +18,14 @@ func main() {
 
 	// Handle root path with a FileServer to provide /index.html
 	fileServer := http.FileServer(http.Dir(filepathRoot))
-	mux.Handle("/", fileServer)
+	mux.Handle("/app/", http.StripPrefix("/app", fileServer))
+
+	//Handle a health check endpoint
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
 
 	log.Printf("Serving on port: %s\n", port)
 	log.Fatal(srv.ListenAndServe())
