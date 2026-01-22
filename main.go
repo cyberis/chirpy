@@ -15,6 +15,10 @@ func main() {
 		Handler: mux,
 	}
 
+	// Handle root path with a FileServer to provide /index.html
+	fileServer := http.FileServer(http.Dir("."))
+	mux.Handle("/", fileServer)
+
 	log.Printf("Serving on port: %s\n", port)
 	log.Fatal(srv.ListenAndServe())
 }
