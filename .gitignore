@@ -1,1 +1,7 @@
+# Senstive files
+.env
+connection_string.txt
+
+# Built files
 out
+chirpy

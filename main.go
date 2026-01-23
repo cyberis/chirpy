@@ -1,16 +1,23 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync/atomic"
+
+	"github.com/cyberis/chirpy/internal/database"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	dbQueries      *database.Queries
 }
 
 type chirpRequest struct {
@@ -32,6 +39,28 @@ type errorResponse struct {
 func main() {
 	const filepathRoot = "."
 	const port = "8080"
+	// Load environment variables from .env file
+	err := godotenv.Load()
+	if err != nil {
+		log.Printf("Error loading .env file: %v", err)
+	}
+
+	// Example of accessing a database URL from environment variables
+	dbURL := os.Getenv("DB_URL")
+	if dbURL == "" {
+		log.Println("DB_URL not set in environment variables")
+	} else {
+		log.Printf("Database URL: %s", dbURL)
+	}
+
+	// Open database connection here if needed
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer db.Close()
+
+	// Set up HTTP server and routes
 
 	mux := http.NewServeMux()
 
@@ -42,6 +71,7 @@ func main() {
 
 	apiCfg := apiConfig{
 		fileserverHits: atomic.Int32{},
+		dbQueries:      database.New(db),
 	}
 
 	// Handle root path with a FileServer to provide /index.html
