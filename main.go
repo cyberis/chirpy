@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -9,6 +10,18 @@ import (
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+}
+
+type chirpRequest struct {
+	Body string `json:"body"`
+}
+
+type validResponse struct {
+	Valid bool `json:"valid"`
+}
+
+type errorResponse struct {
+	Error string `json:"error"`
 }
 
 func main() {
@@ -37,6 +50,9 @@ func main() {
 	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
 	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
 
+	// Handle a validation endpoint
+	mux.HandleFunc("POST /api/validate_chirp", handlerValidation)
+
 	log.Printf("Serving on port: %s\n", port)
 	log.Fatal(srv.ListenAndServe())
 }
@@ -64,6 +80,29 @@ func (cfg *apiConfig) handlerMetrics(w http.ResponseWriter, r *http.Request) {
 		`, cfg.fileserverHits.Load())))
 }
 
+func handlerValidation(w http.ResponseWriter, r *http.Request) {
+	var req chirpRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Something went wrong")
+		return
+	}
+
+	// Example validation: check if the body is not empty
+	if req.Body == "" {
+		respondWithError(w, http.StatusBadRequest, "Blank chirps are not allowed")
+		return
+	}
+
+	// Check if the body exceeds 140 characters
+	if len(req.Body) > 140 {
+		respondWithError(w, http.StatusBadRequest, "Chirp is too long")
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, validResponse{Valid: true})
+}
+
 func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 	cfg.fileserverHits.Store(0)
 	w.WriteHeader(http.StatusOK)
@@ -74,4 +113,17 @@ func handlerReadiness(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(http.StatusText(http.StatusOK)))
+}
+
+// Helper functions
+func respondWithError(w http.ResponseWriter, statusCode int, message string) {
+	w.Header().Add("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(errorResponse{Error: message})
+}
+
+func respondWithJSON(w http.ResponseWriter, statusCode int, payload interface{}) {
+	w.Header().Add("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(payload)
 }
