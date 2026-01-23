@@ -24,10 +24,6 @@ type chirpRequest struct {
 	Body string `json:"body"`
 }
 
-type validResponse struct {
-	Valid bool `json:"valid"`
-}
-
 type cleanedReponse struct {
 	CleanedBody string `json:"cleaned_body"`
 }
