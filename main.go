@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync/atomic"
 )
 
@@ -18,6 +19,10 @@ type chirpRequest struct {
 
 type validResponse struct {
 	Valid bool `json:"valid"`
+}
+
+type cleanedReponse struct {
+	CleanedBody string `json:"cleaned_body"`
 }
 
 type errorResponse struct {
@@ -99,8 +104,8 @@ func handlerValidation(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusBadRequest, "Chirp is too long")
 		return
 	}
-
-	respondWithJSON(w, http.StatusOK, validResponse{Valid: true})
+	sanitizedBody := cleanBody(req.Body)
+	respondWithJSON(w, http.StatusOK, cleanedReponse{CleanedBody: sanitizedBody})
 }
 
 func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
@@ -126,4 +131,17 @@ func respondWithJSON(w http.ResponseWriter, statusCode int, payload interface{})
 	w.Header().Add("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(statusCode)
 	json.NewEncoder(w).Encode(payload)
+}
+
+func cleanBody(body string) string {
+	badWords := []string{"kerfuffle", "sharbert", "fornax"}
+	words := strings.Split(body, " ")
+	for i, word := range words {
+		for _, badWord := range badWords {
+			if strings.ToLower(word) == badWord {
+				words[i] = "****"
+			}
+		}
+	}
+	return strings.Join(words, " ")
 }
