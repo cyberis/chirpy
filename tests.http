@@ -68,5 +68,37 @@ Content-Type: application/json
 }
 
 ###
+
 GET http://localhost:8080/api/chirps HTTP/1.1
+Content-Type: application/json
+
+###
+
+# @name createSaul
+POST http://localhost:8080/api/users HTTP/1.1
+Content-Type: application/json  
+
+{
+  "email": "saul@bettercall.com"
+}
+
+###
+
+# @name createSaulChirp
+POST http://localhost:8080/api/chirps HTTP/1.1
+Content-Type: application/json  
+
+{
+  "body": "I'm gonna be a damn good developer, and people are gonna know about it.",
+  "user_id": "{{createSaul.response.body.id}}"
+}
+
+###
+
+GET http://localhost:8080/api/chirps/{{createSaulChirp.response.body.id}} HTTP/1.1
+Content-Type: application/json
+
+###
+
+GET http://localhost:8080/api/chirps/123e4567-e89b-12d3-a456-426614174059 HTTP/1.1
 Content-Type: application/json

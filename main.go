@@ -103,6 +103,9 @@ func main() {
 	// Handle Get All Chirps endpoint
 	mux.HandleFunc("GET /api/chirps", apiCfg.handlerGetAllChirps)
 
+	// Handle Get Chirp by ID endpoint
+	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.handlerGetChirpByID)
+
 	log.Printf("Serving on port: %s\n", port)
 	log.Fatal(srv.ListenAndServe())
 }
@@ -192,6 +195,28 @@ func (cfg *apiConfig) handlerGetAllChirps(w http.ResponseWriter, r *http.Request
 	}
 
 	respondWithJSON(w, http.StatusOK, chirps)
+}
+
+// Handle Get Chirp by ID endpoint
+func (cfg *apiConfig) handlerGetChirpByID(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("chirpID")
+	chirpID, err := uuid.Parse(idStr)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid chirp ID")
+		return
+	}
+
+	chirp, err := cfg.dbQueries.GetChirpByID(r.Context(), chirpID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			respondWithError(w, http.StatusNotFound, "Chirp not found")
+		} else {
+			respondWithError(w, http.StatusInternalServerError, "Failed to retrieve chirp")
+		}
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, chirp)
 }
 
 func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
