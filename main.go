@@ -18,6 +18,7 @@ import (
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	dbQueries      *database.Queries
+	platform       string
 }
 
 type chirpRequest struct {
@@ -45,12 +46,20 @@ func main() {
 		log.Printf("Error loading .env file: %v", err)
 	}
 
-	// Example of accessing a database URL from environment variables
+	// Access database URL from environment variables
 	dbURL := os.Getenv("DB_URL")
 	if dbURL == "" {
 		log.Println("DB_URL not set in environment variables")
 	} else {
 		log.Printf("Database URL: %s", dbURL)
+	}
+
+	// Access platform from environment variables
+	platform := os.Getenv("PLATFORM")
+	if platform == "" {
+		log.Println("PLATFORM not set in environment variables")
+	} else {
+		log.Printf("Running on platform: %s", platform)
 	}
 
 	// Open database connection here if needed
@@ -72,6 +81,7 @@ func main() {
 	apiCfg := apiConfig{
 		fileserverHits: atomic.Int32{},
 		dbQueries:      database.New(db),
+		platform:       platform,
 	}
 
 	// Handle root path with a FileServer to provide /index.html
@@ -162,9 +172,18 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 }
 
 func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
+	if cfg.platform != "dev" {
+		respondWithError(w, http.StatusForbidden, "Reset endpoint is only available in dev environment")
+		return
+	}
+
+	err := cfg.dbQueries.ResetUsers(r.Context())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to reset users")
+		return
+	}
 	cfg.fileserverHits.Store(0)
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Hits reset to 0"))
+	respondWithJSON(w, http.StatusOK, map[string]string{"message": "Hits reset to 0, users table cleared"})
 }
 
 func handlerReadiness(w http.ResponseWriter, r *http.Request) {
