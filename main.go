@@ -100,6 +100,9 @@ func main() {
 	// Handle database chirp creation endpoint
 	mux.HandleFunc("POST /api/chirps", apiCfg.handlerCreateChirp)
 
+	// Handle Get All Chirps endpoint
+	mux.HandleFunc("GET /api/chirps", apiCfg.handlerGetAllChirps)
+
 	log.Printf("Serving on port: %s\n", port)
 	log.Fatal(srv.ListenAndServe())
 }
@@ -177,6 +180,18 @@ func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request)
 
 	// Respond with created chirp details
 	respondWithJSON(w, http.StatusCreated, chirp)
+}
+
+// Handle Get All Chirps endpoint
+
+func (cfg *apiConfig) handlerGetAllChirps(w http.ResponseWriter, r *http.Request) {
+	chirps, err := cfg.dbQueries.GetAllChirps(r.Context())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to retrieve chirps")
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, chirps)
 }
 
 func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
