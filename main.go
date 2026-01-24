@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/google/uuid"
+
 	"github.com/cyberis/chirpy/internal/database"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -22,11 +24,8 @@ type apiConfig struct {
 }
 
 type chirpRequest struct {
-	Body string `json:"body"`
-}
-
-type cleanedReponse struct {
-	CleanedBody string `json:"cleaned_body"`
+	Body   string        `json:"body"`
+	UserID uuid.NullUUID `json:"user_id"`
 }
 
 type errorResponse struct {
@@ -95,11 +94,11 @@ func main() {
 	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerMetrics)
 	mux.HandleFunc("POST /admin/reset", apiCfg.handlerReset)
 
-	// Handle a validation endpoint
-	mux.HandleFunc("POST /api/validate_chirp", handlerValidation)
-
 	// Handle database user creation endpoint
 	mux.HandleFunc("POST /api/users", apiCfg.handlerCreateUser)
+
+	// Handle database chirp creation endpoint
+	mux.HandleFunc("POST /api/chirps", apiCfg.handlerCreateChirp)
 
 	log.Printf("Serving on port: %s\n", port)
 	log.Fatal(srv.ListenAndServe())
@@ -128,29 +127,6 @@ func (cfg *apiConfig) handlerMetrics(w http.ResponseWriter, r *http.Request) {
 		`, cfg.fileserverHits.Load())))
 }
 
-func handlerValidation(w http.ResponseWriter, r *http.Request) {
-	var req chirpRequest
-	err := json.NewDecoder(r.Body).Decode(&req)
-	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Something went wrong")
-		return
-	}
-
-	// Example validation: check if the body is not empty
-	if req.Body == "" {
-		respondWithError(w, http.StatusBadRequest, "Blank chirps are not allowed")
-		return
-	}
-
-	// Check if the body exceeds 140 characters
-	if len(req.Body) > 140 {
-		respondWithError(w, http.StatusBadRequest, "Chirp is too long")
-		return
-	}
-	sanitizedBody := cleanBody(req.Body)
-	respondWithJSON(w, http.StatusOK, cleanedReponse{CleanedBody: sanitizedBody})
-}
-
 // Handle database user creation endpoint
 func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) {
 	var req userRequest
@@ -169,6 +145,38 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 
 	// Respond with created user details
 	respondWithJSON(w, http.StatusCreated, user)
+}
+
+func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request) {
+	var req chirpRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid chirp data")
+		return
+	}
+
+	// Validate and clean the chirp body
+	cleanedBody, err := validateChirp(req.Body)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	req.Body = cleanedBody
+
+	// Create chirp in the database
+	chirpParams := database.CreateChirpParams{
+		Body:   req.Body,
+		UserID: req.UserID,
+	}
+
+	chirp, err := cfg.dbQueries.CreateChirp(r.Context(), chirpParams)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to create chirp")
+		return
+	}
+
+	// Respond with created chirp details
+	respondWithJSON(w, http.StatusCreated, chirp)
 }
 
 func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
@@ -203,6 +211,16 @@ func respondWithJSON(w http.ResponseWriter, statusCode int, payload interface{})
 	w.Header().Add("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(statusCode)
 	json.NewEncoder(w).Encode(payload)
+}
+
+func validateChirp(body string) (string, error) {
+	if body == "" {
+		return "", fmt.Errorf("Blank chirps are not allowed")
+	}
+	if len(body) > 140 {
+		return "", fmt.Errorf("Chirp is too long")
+	}
+	return cleanBody(body), nil
 }
 
 func cleanBody(body string) string {

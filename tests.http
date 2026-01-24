@@ -1,3 +1,8 @@
+POST http://localhost:8080/admin/reset HTTP/1.1
+Content-Type: application/json
+
+###
+
 POST http://localhost:8080/api/users HTTP/1.1
 Content-Type: application/json
 
@@ -34,5 +39,20 @@ Content-Type: application/json
 
 ###
 
-POST http://localhost:8080/admin/reset HTTP/1.1
-Content-Type: application/json
+# @name createSaul
+POST http://localhost:8080/api/users HTTP/1.1
+Content-Type: application/json  
+
+{
+  "email": "saul@bettercall.com"
+}
+
+###
+
+POST http://localhost:8080/api/chirps HTTP/1.1
+Content-Type: application/json  
+
+{
+  "body": "If you're committed enough, you can make any story work.",
+  "user_id": "{{createSaul.response.body.id}}"
+}
