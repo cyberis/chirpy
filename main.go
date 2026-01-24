@@ -32,6 +32,10 @@ type errorResponse struct {
 	Error string `json:"error"`
 }
 
+type userRequest struct {
+	Email string `json:"email"`
+}
+
 func main() {
 	const filepathRoot = "."
 	const port = "8080"
@@ -84,6 +88,9 @@ func main() {
 	// Handle a validation endpoint
 	mux.HandleFunc("POST /api/validate_chirp", handlerValidation)
 
+	// Handle database user creation endpoint
+	mux.HandleFunc("POST /api/users", apiCfg.handlerCreateUser)
+
 	log.Printf("Serving on port: %s\n", port)
 	log.Fatal(srv.ListenAndServe())
 }
@@ -132,6 +139,26 @@ func handlerValidation(w http.ResponseWriter, r *http.Request) {
 	}
 	sanitizedBody := cleanBody(req.Body)
 	respondWithJSON(w, http.StatusOK, cleanedReponse{CleanedBody: sanitizedBody})
+}
+
+// Handle database user creation endpoint
+func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) {
+	var req userRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid user email")
+		return
+	}
+
+	// Create user in the database
+	user, err := cfg.dbQueries.CreateUser(r.Context(), req.Email)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to create user")
+		return
+	}
+
+	// Respond with created user details
+	respondWithJSON(w, http.StatusCreated, user)
 }
 
 func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
