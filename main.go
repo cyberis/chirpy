@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/cyberis/chirpy/internal/auth"
 	"github.com/cyberis/chirpy/internal/database"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -33,7 +34,13 @@ type errorResponse struct {
 }
 
 type userRequest struct {
-	Email string `json:"email"`
+	Email          string `json:"email"`
+	HashedPassword string `json:"password"`
+}
+
+type loginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
 func main() {
@@ -97,6 +104,9 @@ func main() {
 	// Handle database user creation endpoint
 	mux.HandleFunc("POST /api/users", apiCfg.handlerCreateUser)
 
+	// Handle Login endpoint
+	mux.HandleFunc("POST /api/login", apiCfg.handlerLogin)
+
 	// Handle database chirp creation endpoint
 	mux.HandleFunc("POST /api/chirps", apiCfg.handlerCreateChirp)
 
@@ -142,8 +152,19 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Hash the password
+	hashedPassword, err := auth.HashPassword(req.HashedPassword)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to hash password")
+		return
+	}
+	req.HashedPassword = hashedPassword
+
 	// Create user in the database
-	user, err := cfg.dbQueries.CreateUser(r.Context(), req.Email)
+	user, err := cfg.dbQueries.CreateUser(r.Context(), database.CreateUserParams{
+		Email:          req.Email,
+		HashedPassword: req.HashedPassword,
+	})
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to create user")
 		return
@@ -151,6 +172,46 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 
 	// Respond with created user details
 	respondWithJSON(w, http.StatusCreated, user)
+}
+
+// Handle Login endpoint
+func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
+	var req loginRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid login data")
+		return
+	}
+
+	// Retrieve user by email
+	user, err := cfg.dbQueries.GetUserByEmail(r.Context(), req.Email)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			respondWithError(w, http.StatusUnauthorized, "Invalid email or password")
+		} else {
+			respondWithError(w, http.StatusInternalServerError, "Failed to retrieve user")
+		}
+		return
+	}
+
+	// Compare provided password with stored hashed password
+	match, err := auth.CheckPasswordHash(req.Password, user.HashedPassword)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to verify password")
+		return
+	}
+	if !match {
+		respondWithError(w, http.StatusUnauthorized, "Invalid email or password")
+		return
+	}
+
+	// Respond with user details on successful login
+	respondWithJSON(w, http.StatusOK, database.CreateUserRow{
+		ID:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
+	})
 }
 
 func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request) {

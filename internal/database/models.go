@@ -19,8 +19,9 @@ type Chirp struct {
 }
 
 type User struct {
-	ID        uuid.UUID    `json:"id"`
-	CreatedAt sql.NullTime `json:"created_at"`
-	UpdatedAt sql.NullTime `json:"updated_at"`
-	Email     string       `json:"email"`
+	ID             uuid.UUID    `json:"id"`
+	CreatedAt      sql.NullTime `json:"created_at"`
+	UpdatedAt      sql.NullTime `json:"updated_at"`
+	Email          string       `json:"email"`
+	HashedPassword string       `json:"password"`
 }
