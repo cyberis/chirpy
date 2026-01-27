@@ -9,6 +9,10 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	TokenIssuer = "chirpy"
+)
+
 // HashPassword hashes the given plain-text password using Argon2id.
 func HashPassword(password string) (string, error) {
 	// Use default parameters for Argon2id
@@ -37,7 +41,7 @@ func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (str
 		Subject:   userID.String(),
 		ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiresIn)),
 		IssuedAt:  jwt.NewNumericDate(time.Now()),
-		Issuer:    "chirpy",
+		Issuer:    TokenIssuer,
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signedToken, err := token.SignedString([]byte(tokenSecret))
@@ -59,6 +63,11 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 	}
 
 	if claims, ok := token.Claims.(*jwt.RegisteredClaims); ok && token.Valid {
+		issuer := claims.Issuer
+		if issuer != TokenIssuer {
+			log.Printf("Invalid token issuer: expected %s, got %s", TokenIssuer, issuer)
+			return uuid.Nil, jwt.ErrTokenInvalidClaims
+		}
 		userID, err := uuid.Parse(claims.Subject)
 		if err != nil {
 			log.Printf("Error parsing user ID from JWT claims: %v", err)
