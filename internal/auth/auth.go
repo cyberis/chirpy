@@ -1,7 +1,10 @@
 package auth
 
 import (
+	"fmt"
 	"log"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/alexedwards/argon2id"
@@ -78,4 +81,17 @@ func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
 		log.Printf("Invalid JWT token")
 		return uuid.Nil, err
 	}
+}
+
+// Get Bearer token from Authorization header
+func GetBearerToken(headers http.Header) (string, error) {
+	const prefix = "Bearer "
+	authHeader := headers.Get("Authorization")
+	if authHeader == "" {
+		return "", fmt.Errorf("Authorization header missing")
+	}
+	if !strings.HasPrefix(authHeader, prefix) {
+		return "", fmt.Errorf("Invalid Authorization header format")
+	}
+	return strings.TrimPrefix(authHeader, prefix), nil
 }

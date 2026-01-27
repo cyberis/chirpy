@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -19,9 +20,11 @@ import (
 )
 
 type apiConfig struct {
-	fileserverHits atomic.Int32
-	dbQueries      *database.Queries
-	platform       string
+	fileserverHits          atomic.Int32
+	dbQueries               *database.Queries
+	platform                string
+	jwtSigningKey           string
+	defaultJWTExpiresInSecs int64
 }
 
 type chirpRequest struct {
@@ -39,8 +42,17 @@ type userRequest struct {
 }
 
 type loginRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Email         string `json:"email"`
+	Password      string `json:"password"`
+	ExpiresInSecs int64  `json:"expires_in_secs,omitempty"`
+}
+
+type loginResponse struct {
+	ID        uuid.UUID    `json:"id"`
+	CreatedAt sql.NullTime `json:"created_at"`
+	UpdatedAt sql.NullTime `json:"updated_at"`
+	Email     string       `json:"email"`
+	Token     string       `json:"token"`
 }
 
 func main() {
@@ -68,6 +80,28 @@ func main() {
 		log.Printf("Running on platform: %s", platform)
 	}
 
+	// Access JWT signing key from environment variables
+	jwtSigningKey := os.Getenv("JWT_SIGNING_KEY")
+	if jwtSigningKey == "" {
+		log.Println("JWT_SIGNING_KEY not set in environment variables")
+	} else {
+		log.Printf("JWT Signing Key loaded")
+	}
+
+	// Access default JWT expiration time from environment variables
+	defaultJWTExpiresInSecsStr := os.Getenv("DEFAULT_JWT_EXPIRES_IN_SECS")
+	var defaultJWTExpiresInSecs int64 = 3600 // Default to 1 hour
+	if defaultJWTExpiresInSecsStr != "" {
+		_, err := fmt.Sscanf(defaultJWTExpiresInSecsStr, "%d", &defaultJWTExpiresInSecs)
+		if err != nil {
+			log.Printf("Error parsing DEFAULT_JWT_EXPIRES_IN_SECS: %v", err)
+		} else {
+			log.Printf("Default JWT expiration time: %d seconds", defaultJWTExpiresInSecs)
+		}
+	} else {
+		log.Println("DEFAULT_JWT_EXPIRES_IN_SECS not set, using default of 3600 seconds")
+	}
+
 	// Open database connection here if needed
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -85,9 +119,11 @@ func main() {
 	}
 
 	apiCfg := apiConfig{
-		fileserverHits: atomic.Int32{},
-		dbQueries:      database.New(db),
-		platform:       platform,
+		fileserverHits:          atomic.Int32{},
+		dbQueries:               database.New(db),
+		platform:                platform,
+		jwtSigningKey:           jwtSigningKey,
+		defaultJWTExpiresInSecs: defaultJWTExpiresInSecs,
 	}
 
 	// Handle root path with a FileServer to provide /index.html
@@ -205,18 +241,50 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Respond with user details on successful login
-	respondWithJSON(w, http.StatusOK, database.CreateUserRow{
+	// Determine token expiration time as specified in the request or use default
+	expiresIn := time.Duration(cfg.defaultJWTExpiresInSecs) * time.Second
+	if req.ExpiresInSecs > 0 && req.ExpiresInSecs <= cfg.defaultJWTExpiresInSecs {
+		expiresIn = time.Duration(req.ExpiresInSecs) * time.Second
+	}
+
+	// Generate JWT token
+	token, err := auth.MakeJWT(user.ID, cfg.jwtSigningKey, expiresIn)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to generate token")
+		return
+	}
+
+	// Prepare login response
+	loginResp := loginResponse{
 		ID:        user.ID,
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
 		Email:     user.Email,
-	})
+		Token:     token,
+	}
+
+	// Respond with login details and token
+	respondWithJSON(w, http.StatusOK, loginResp)
+
 }
 
 func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request) {
+	// Get and validate the Authorization header
+	authToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Missing or invalid Authorization header")
+		return
+	}
+
+	// Validate the JWT token
+	userID, err := auth.ValidateJWT(authToken, cfg.jwtSigningKey)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Invalid or expired token")
+		return
+	}
+	// Decode the chirp request body
 	var req chirpRequest
-	err := json.NewDecoder(r.Body).Decode(&req)
+	err = json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Invalid chirp data")
 		return
@@ -233,7 +301,7 @@ func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request)
 	// Create chirp in the database
 	chirpParams := database.CreateChirpParams{
 		Body:   req.Body,
-		UserID: req.UserID,
+		UserID: uuid.NullUUID{UUID: userID, Valid: true},
 	}
 
 	chirp, err := cfg.dbQueries.CreateChirp(r.Context(), chirpParams)
