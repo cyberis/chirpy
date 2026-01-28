@@ -26,6 +26,7 @@ type apiConfig struct {
 	jwtSigningKey        string
 	JWTExpiresInSecs     int64
 	RefreshExpiresInSecs int64
+	PolkaKey             string
 }
 
 type chirpRequest struct {
@@ -54,6 +55,7 @@ type loginResponse struct {
 	Email        string       `json:"email"`
 	Token        string       `json:"token"`
 	RefreshToken string       `json:"refresh_token"`
+	IsChirpyRed  bool         `json:"is_chirpy_red"`
 }
 
 func main() {
@@ -115,6 +117,14 @@ func main() {
 		}
 	}
 
+	// Access Polka Key from environment variables
+	polkaKey := os.Getenv("POLKA_KEY")
+	if polkaKey == "" {
+		log.Println("POLKA_KEY not set in environment variables")
+	} else {
+		log.Printf("Polka Key loaded")
+	}
+
 	// Open database connection here if needed
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -138,6 +148,7 @@ func main() {
 		jwtSigningKey:        jwtSigningKey,
 		JWTExpiresInSecs:     JWTExpiresInSecs,
 		RefreshExpiresInSecs: RefreshExpiresInSecs,
+		PolkaKey:             polkaKey,
 	}
 
 	// Handle root path with a FileServer to provide /index.html
@@ -358,6 +369,7 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		Email:        user.Email,
 		Token:        token,
 		RefreshToken: refreshToken,
+		IsChirpyRed:  user.IsChirpyRed,
 	}
 
 	// Respond with login details and token
@@ -559,6 +571,18 @@ func (cfg *apiConfig) handlerPolkaWebhook(w http.ResponseWriter, r *http.Request
 	err := json.NewDecoder(r.Body).Decode(&payload)
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Invalid webhook payload")
+		return
+	}
+
+	// Validate API Key from Authorization header
+	apiKey, err := auth.GetAPIKey(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Missing or invalid Authorization header")
+		return
+	}
+	log.Printf("Polka Webhook API Key: %s, wants %s", apiKey, cfg.PolkaKey)
+	if apiKey != cfg.PolkaKey {
+		respondWithError(w, http.StatusUnauthorized, "Invalid API Key")
 		return
 	}
 

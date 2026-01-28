@@ -98,6 +98,19 @@ func GetBearerToken(headers http.Header) (string, error) {
 	return strings.TrimPrefix(authHeader, prefix), nil
 }
 
+// Get API Key From Authorization header
+func GetAPIKey(headers http.Header) (string, error) {
+	const prefix = "ApiKey "
+	authHeader := headers.Get("Authorization")
+	if authHeader == "" {
+		return "", fmt.Errorf("Authorization header missing")
+	}
+	if !strings.HasPrefix(authHeader, prefix) {
+		return "", fmt.Errorf("Invalid Authorization header format")
+	}
+	return strings.TrimPrefix(authHeader, prefix), nil
+}
+
 // MakeRefreshToken generates a secure random refresh token.
 func MakeRefreshToken() (string, error) {
 	const tokenLength = 32 // 32 bytes = 64 hex characters

@@ -21,7 +21,7 @@ VALUES (
     $1,
     $2
 )
-RETURNING id, created_at, updated_at, email
+RETURNING id, created_at, updated_at, email, is_chirpy_red
 `
 
 type CreateUserParams struct {
@@ -30,10 +30,11 @@ type CreateUserParams struct {
 }
 
 type CreateUserRow struct {
-	ID        uuid.UUID    `json:"id"`
-	CreatedAt sql.NullTime `json:"created_at"`
-	UpdatedAt sql.NullTime `json:"updated_at"`
-	Email     string       `json:"email"`
+	ID          uuid.UUID    `json:"id"`
+	CreatedAt   sql.NullTime `json:"created_at"`
+	UpdatedAt   sql.NullTime `json:"updated_at"`
+	Email       string       `json:"email"`
+	IsChirpyRed bool         `json:"is_chirpy_red"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error) {
@@ -44,33 +45,27 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateU
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Email,
+		&i.IsChirpyRed,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, created_at, updated_at, email, hashed_password
+SELECT id, created_at, updated_at, email, hashed_password, is_chirpy_red
 FROM users
 WHERE email = $1
 `
 
-type GetUserByEmailRow struct {
-	ID             uuid.UUID    `json:"id"`
-	CreatedAt      sql.NullTime `json:"created_at"`
-	UpdatedAt      sql.NullTime `json:"updated_at"`
-	Email          string       `json:"email"`
-	HashedPassword string       `json:"password"`
-}
-
-func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error) {
+func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
 	row := q.db.QueryRowContext(ctx, getUserByEmail, email)
-	var i GetUserByEmailRow
+	var i User
 	err := row.Scan(
 		&i.ID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Email,
 		&i.HashedPassword,
+		&i.IsChirpyRed,
 	)
 	return i, err
 }
@@ -121,7 +116,7 @@ const updateUserPasswordAndEmail = `-- name: UpdateUserPasswordAndEmail :one
 UPDATE users
 SET hashed_password = $2, email = $3, updated_at = CURRENT_TIMESTAMP
 WHERE id = $1
-RETURNING id, created_at, updated_at, email
+RETURNING id, created_at, updated_at, email, is_chirpy_red
 `
 
 type UpdateUserPasswordAndEmailParams struct {
@@ -131,10 +126,11 @@ type UpdateUserPasswordAndEmailParams struct {
 }
 
 type UpdateUserPasswordAndEmailRow struct {
-	ID        uuid.UUID    `json:"id"`
-	CreatedAt sql.NullTime `json:"created_at"`
-	UpdatedAt sql.NullTime `json:"updated_at"`
-	Email     string       `json:"email"`
+	ID          uuid.UUID    `json:"id"`
+	CreatedAt   sql.NullTime `json:"created_at"`
+	UpdatedAt   sql.NullTime `json:"updated_at"`
+	Email       string       `json:"email"`
+	IsChirpyRed bool         `json:"is_chirpy_red"`
 }
 
 func (q *Queries) UpdateUserPasswordAndEmail(ctx context.Context, arg UpdateUserPasswordAndEmailParams) (UpdateUserPasswordAndEmailRow, error) {
@@ -145,6 +141,7 @@ func (q *Queries) UpdateUserPasswordAndEmail(ctx context.Context, arg UpdateUser
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Email,
+		&i.IsChirpyRed,
 	)
 	return i, err
 }

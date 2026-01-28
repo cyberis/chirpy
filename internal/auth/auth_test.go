@@ -224,3 +224,56 @@ func TestMakeRefreshToken(t *testing.T) {
 		t.Errorf("MakeRefreshToken() expected length = %d, got %d", length*2, len(token1))
 	}
 }
+
+func TestGetPolkaKey(t *testing.T) {
+	tests := []struct {
+		name        string
+		headers     map[string]string
+		expectedKey string
+		wantErr     bool
+	}{
+		{
+			name: "Valid ApiKey",
+			headers: map[string]string{
+				"Authorization": "ApiKey validpolkakey123",
+			},
+			expectedKey: "validpolkakey123",
+			wantErr:     false,
+		},
+		{
+			name: "Missing Authorization header",
+			headers: map[string]string{
+				"Content-Type": "application/json",
+			},
+			expectedKey: "",
+			wantErr:     true,
+		},
+		{
+			name: "Invalid Authorization header format",
+			headers: map[string]string{
+				"Authorization": "InvalidFormat polkakey123",
+			},
+			expectedKey: "",
+			wantErr:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			httpHeaders := make(map[string][]string)
+			for k, v := range tt.headers {
+				httpHeaders[k] = []string{v}
+			}
+			headers := http.Header(httpHeaders)
+
+			key, err := GetAPIKey(headers)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetAPIKey() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && key != tt.expectedKey {
+				t.Errorf("GetAPIKey() expected key = %v, got %v", tt.expectedKey, key)
+			}
+		})
+	}
+}
