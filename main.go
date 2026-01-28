@@ -172,6 +172,11 @@ func main() {
 	// Handle Get Chirp by ID endpoint
 	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.handlerGetChirpByID)
 
+	// Handle Update User endpoint
+	mux.HandleFunc("PUT /api/users", apiCfg.handlerUpdateUser)
+
+	// Start the HTTP server
+
 	log.Printf("Serving on port: %s\n", port)
 	log.Fatal(srv.ListenAndServe())
 }
@@ -228,6 +233,54 @@ func (cfg *apiConfig) handlerCreateUser(w http.ResponseWriter, r *http.Request) 
 
 	// Respond with created user details
 	respondWithJSON(w, http.StatusCreated, user)
+}
+
+// Handle Update User endpoint
+func (cfg *apiConfig) handlerUpdateUser(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid user data")
+		return
+	}
+
+	// Get and validate the Authorization header
+	authToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Missing or invalid Authorization header")
+		return
+	}
+
+	// Validate the JWT token
+	userID, err := auth.ValidateJWT(authToken, cfg.jwtSigningKey)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Invalid or expired token")
+		return
+	}
+
+	// Hash the new password
+	hashedPassword, err := auth.HashPassword(req.Password)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to hash password")
+		return
+	}
+
+	// Update user in the database
+	updatedUser, err := cfg.dbQueries.UpdateUserPasswordAndEmail(r.Context(), database.UpdateUserPasswordAndEmailParams{
+		ID:             userID,
+		HashedPassword: hashedPassword,
+		Email:          req.Email,
+	})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to update user")
+		return
+	}
+
+	// Respond with updated user details
+	respondWithJSON(w, http.StatusOK, updatedUser)
 }
 
 // Handle Login endpoint
