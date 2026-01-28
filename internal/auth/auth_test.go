@@ -213,3 +213,14 @@ func TestGetBearerToken(t *testing.T) {
 		})
 	}
 }
+
+func TestMakeRefreshToken(t *testing.T) {
+	length := 32
+	token1, err := MakeRefreshToken()
+	if err != nil {
+		t.Fatalf("MakeRefreshToken() error = %v", err)
+	}
+	if len(token1) != length*2 {
+		t.Errorf("MakeRefreshToken() expected length = %d, got %d", length*2, len(token1))
+	}
+}

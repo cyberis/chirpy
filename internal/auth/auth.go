@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net/http"
@@ -94,4 +96,16 @@ func GetBearerToken(headers http.Header) (string, error) {
 		return "", fmt.Errorf("Invalid Authorization header format")
 	}
 	return strings.TrimPrefix(authHeader, prefix), nil
+}
+
+// MakeRefreshToken generates a secure random refresh token.
+func MakeRefreshToken() (string, error) {
+	const tokenLength = 32 // 32 bytes = 64 hex characters
+	bytes := make([]byte, tokenLength)
+	_, err := rand.Read(bytes)
+	if err != nil {
+		log.Printf("Error generating random bytes for refresh token: %v", err)
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
 }

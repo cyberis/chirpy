@@ -20,11 +20,12 @@ import (
 )
 
 type apiConfig struct {
-	fileserverHits          atomic.Int32
-	dbQueries               *database.Queries
-	platform                string
-	jwtSigningKey           string
-	defaultJWTExpiresInSecs int64
+	fileserverHits       atomic.Int32
+	dbQueries            *database.Queries
+	platform             string
+	jwtSigningKey        string
+	JWTExpiresInSecs     int64
+	RefreshExpiresInSecs int64
 }
 
 type chirpRequest struct {
@@ -42,17 +43,17 @@ type userRequest struct {
 }
 
 type loginRequest struct {
-	Email         string `json:"email"`
-	Password      string `json:"password"`
-	ExpiresInSecs int64  `json:"expires_in_secs,omitempty"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
 type loginResponse struct {
-	ID        uuid.UUID    `json:"id"`
-	CreatedAt sql.NullTime `json:"created_at"`
-	UpdatedAt sql.NullTime `json:"updated_at"`
-	Email     string       `json:"email"`
-	Token     string       `json:"token"`
+	ID           uuid.UUID    `json:"id"`
+	CreatedAt    sql.NullTime `json:"created_at"`
+	UpdatedAt    sql.NullTime `json:"updated_at"`
+	Email        string       `json:"email"`
+	Token        string       `json:"token"`
+	RefreshToken string       `json:"refresh_token"`
 }
 
 func main() {
@@ -88,18 +89,30 @@ func main() {
 		log.Printf("JWT Signing Key loaded")
 	}
 
-	// Access default JWT expiration time from environment variables
-	defaultJWTExpiresInSecsStr := os.Getenv("DEFAULT_JWT_EXPIRES_IN_SECS")
-	var defaultJWTExpiresInSecs int64 = 3600 // Default to 1 hour
-	if defaultJWTExpiresInSecsStr != "" {
-		_, err := fmt.Sscanf(defaultJWTExpiresInSecsStr, "%d", &defaultJWTExpiresInSecs)
+	// Access JWT expiration time from environment variables
+	JWTExpiresInSecs := int64(3600) // Default to 1 hour
+	jwtExpiresStr := os.Getenv("JWT_EXPIRES_IN_SECS")
+	if jwtExpiresStr != "" {
+		var parsed int64
+		_, err := fmt.Sscanf(jwtExpiresStr, "%d", &parsed)
 		if err != nil {
-			log.Printf("Error parsing DEFAULT_JWT_EXPIRES_IN_SECS: %v", err)
+			log.Printf("Invalid JWT_EXPIRES_IN_SECS value: %v", err)
 		} else {
-			log.Printf("Default JWT expiration time: %d seconds", defaultJWTExpiresInSecs)
+			JWTExpiresInSecs = parsed
 		}
-	} else {
-		log.Println("DEFAULT_JWT_EXPIRES_IN_SECS not set, using default of 3600 seconds")
+	}
+
+	// Access Refresh Token expiration time from environment variables
+	RefreshExpiresInSecs := int64(216000) // Default to 60 Days
+	refreshExpiresStr := os.Getenv("REFRESH_EXPIRES_IN_SECS")
+	if refreshExpiresStr != "" {
+		var parsed int64
+		_, err := fmt.Sscanf(refreshExpiresStr, "%d", &parsed)
+		if err != nil {
+			log.Printf("Invalid REFRESH_EXPIRES_IN_SECS value: %v", err)
+		} else {
+			RefreshExpiresInSecs = parsed
+		}
 	}
 
 	// Open database connection here if needed
@@ -119,11 +132,12 @@ func main() {
 	}
 
 	apiCfg := apiConfig{
-		fileserverHits:          atomic.Int32{},
-		dbQueries:               database.New(db),
-		platform:                platform,
-		jwtSigningKey:           jwtSigningKey,
-		defaultJWTExpiresInSecs: defaultJWTExpiresInSecs,
+		fileserverHits:       atomic.Int32{},
+		dbQueries:            database.New(db),
+		platform:             platform,
+		jwtSigningKey:        jwtSigningKey,
+		JWTExpiresInSecs:     JWTExpiresInSecs,
+		RefreshExpiresInSecs: RefreshExpiresInSecs,
 	}
 
 	// Handle root path with a FileServer to provide /index.html
@@ -142,6 +156,12 @@ func main() {
 
 	// Handle Login endpoint
 	mux.HandleFunc("POST /api/login", apiCfg.handlerLogin)
+
+	// Handle Refresh Token endpoint
+	mux.HandleFunc("POST /api/refresh", apiCfg.handlerRefreshToken)
+
+	// Handle Revoke Token endpoint
+	mux.HandleFunc("POST /api/revoke", apiCfg.handlerRevokeToken)
 
 	// Handle database chirp creation endpoint
 	mux.HandleFunc("POST /api/chirps", apiCfg.handlerCreateChirp)
@@ -241,31 +261,99 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Determine token expiration time as specified in the request or use default
-	expiresIn := time.Duration(cfg.defaultJWTExpiresInSecs) * time.Second
-	if req.ExpiresInSecs > 0 && req.ExpiresInSecs <= cfg.defaultJWTExpiresInSecs {
-		expiresIn = time.Duration(req.ExpiresInSecs) * time.Second
-	}
+	// Prepare token expiration durations
+	ExpiresInSecs := time.Duration(cfg.JWTExpiresInSecs) * time.Second
+	RefreshExpiresInSecs := time.Duration(cfg.RefreshExpiresInSecs) * time.Second
 
 	// Generate JWT token
-	token, err := auth.MakeJWT(user.ID, cfg.jwtSigningKey, expiresIn)
+	token, err := auth.MakeJWT(user.ID, cfg.jwtSigningKey, ExpiresInSecs)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to generate token")
 		return
 	}
 
+	// Make Refresh Token
+	refreshToken, err := auth.MakeRefreshToken()
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to generate refresh token")
+		return
+	}
+
+	// Store Refresh Token in the database
+	refreshTokenParams := database.CreateRefreshTokenParams{
+		Token:     refreshToken,
+		UserID:    uuid.NullUUID{UUID: user.ID, Valid: true},
+		ExpiresAt: time.Now().Add(RefreshExpiresInSecs),
+	}
+	_, err = cfg.dbQueries.CreateRefreshToken(r.Context(), refreshTokenParams)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to store refresh token")
+		return
+	}
+
 	// Prepare login response
 	loginResp := loginResponse{
-		ID:        user.ID,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email,
-		Token:     token,
+		ID:           user.ID,
+		CreatedAt:    user.CreatedAt,
+		UpdatedAt:    user.UpdatedAt,
+		Email:        user.Email,
+		Token:        token,
+		RefreshToken: refreshToken,
 	}
 
 	// Respond with login details and token
 	respondWithJSON(w, http.StatusOK, loginResp)
 
+}
+
+// Handle Token Refresh endpoint
+func (cfg *apiConfig) handlerRefreshToken(w http.ResponseWriter, r *http.Request) {
+	refreshToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Missing or invalid Authorization header")
+		return
+	}
+	// Get Valid Refresh Token (ie not revoked and not expired) from DB
+	dbRefreshToken, err := cfg.dbQueries.GetValidRefreshTokenByToken(r.Context(), refreshToken)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			respondWithError(w, http.StatusUnauthorized, "Invalid refresh token")
+		} else {
+			respondWithError(w, http.StatusInternalServerError, "Failed to retrieve refresh token")
+		}
+		return
+	}
+	// Generate new JWT token
+	ExpiresInSecs := time.Duration(cfg.JWTExpiresInSecs) * time.Second
+	userID := dbRefreshToken.UserID.UUID
+	newToken, err := auth.MakeJWT(userID, cfg.jwtSigningKey, ExpiresInSecs)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to generate token")
+		return
+	}
+	// Respond with new JWT token
+	respondWithJSON(w, http.StatusOK, map[string]string{"token": newToken})
+}
+
+// Handle Token Revoke endpoint
+func (cfg *apiConfig) handlerRevokeToken(w http.ResponseWriter, r *http.Request) {
+	refreshToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Missing or invalid Authorization header")
+		return
+	}
+	// Revoke the refresh token in the database
+	err = cfg.dbQueries.RevokeRefreshToken(r.Context(), refreshToken)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			respondWithError(w, http.StatusUnauthorized, "Invalid refresh token")
+		} else {
+			respondWithError(w, http.StatusInternalServerError, "Failed to revoke refresh token")
+		}
+		return
+	}
+	// Respond with success status
+	respondWithStatusOnly(w, http.StatusNoContent)
 }
 
 func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request) {
@@ -315,7 +403,6 @@ func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request)
 }
 
 // Handle Get All Chirps endpoint
-
 func (cfg *apiConfig) handlerGetAllChirps(w http.ResponseWriter, r *http.Request) {
 	chirps, err := cfg.dbQueries.GetAllChirps(r.Context())
 	if err != nil {
@@ -381,6 +468,19 @@ func respondWithJSON(w http.ResponseWriter, statusCode int, payload interface{})
 	w.WriteHeader(statusCode)
 	json.NewEncoder(w).Encode(payload)
 }
+
+func respondWithHeadersOnly(w http.ResponseWriter, statusCode int, headers map[string]string) {
+	for key, value := range headers {
+		w.Header().Add(key, value)
+	}
+	w.WriteHeader(statusCode)
+}
+
+func respondWithStatusOnly(w http.ResponseWriter, statusCode int) {
+	w.WriteHeader(statusCode)
+}
+
+// Validate and clean chirp body
 
 func validateChirp(body string) (string, error) {
 	if body == "" {
