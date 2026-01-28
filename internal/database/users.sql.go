@@ -54,9 +54,17 @@ FROM users
 WHERE email = $1
 `
 
-func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
+type GetUserByEmailRow struct {
+	ID             uuid.UUID    `json:"id"`
+	CreatedAt      sql.NullTime `json:"created_at"`
+	UpdatedAt      sql.NullTime `json:"updated_at"`
+	Email          string       `json:"email"`
+	HashedPassword string       `json:"password"`
+}
+
+func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error) {
 	row := q.db.QueryRowContext(ctx, getUserByEmail, email)
-	var i User
+	var i GetUserByEmailRow
 	err := row.Scan(
 		&i.ID,
 		&i.CreatedAt,
@@ -74,6 +82,39 @@ DELETE FROM users
 func (q *Queries) ResetUsers(ctx context.Context) error {
 	_, err := q.db.ExecContext(ctx, resetUsers)
 	return err
+}
+
+const updateUserChirpyRedStatus = `-- name: UpdateUserChirpyRedStatus :one
+UPDATE users
+SET is_chirpy_red = $2, updated_at = CURRENT_TIMESTAMP
+WHERE id = $1
+RETURNING id, created_at, updated_at, email, is_chirpy_red
+`
+
+type UpdateUserChirpyRedStatusParams struct {
+	ID          uuid.UUID `json:"id"`
+	IsChirpyRed bool      `json:"is_chirpy_red"`
+}
+
+type UpdateUserChirpyRedStatusRow struct {
+	ID          uuid.UUID    `json:"id"`
+	CreatedAt   sql.NullTime `json:"created_at"`
+	UpdatedAt   sql.NullTime `json:"updated_at"`
+	Email       string       `json:"email"`
+	IsChirpyRed bool         `json:"is_chirpy_red"`
+}
+
+func (q *Queries) UpdateUserChirpyRedStatus(ctx context.Context, arg UpdateUserChirpyRedStatusParams) (UpdateUserChirpyRedStatusRow, error) {
+	row := q.db.QueryRowContext(ctx, updateUserChirpyRedStatus, arg.ID, arg.IsChirpyRed)
+	var i UpdateUserChirpyRedStatusRow
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Email,
+		&i.IsChirpyRed,
+	)
+	return i, err
 }
 
 const updateUserPasswordAndEmail = `-- name: UpdateUserPasswordAndEmail :one

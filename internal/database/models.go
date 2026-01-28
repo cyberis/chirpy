@@ -34,4 +34,5 @@ type User struct {
 	UpdatedAt      sql.NullTime `json:"updated_at"`
 	Email          string       `json:"email"`
 	HashedPassword string       `json:"password"`
+	IsChirpyRed    bool         `json:"is_chirpy_red"`
 }

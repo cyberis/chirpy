@@ -178,6 +178,9 @@ func main() {
 	// Handle Delete Chirp by ID endpoint
 	mux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.handlerDeleteChirpByID)
 
+	// Handle Polka Webhook endpoint
+	mux.HandleFunc("POST /api/polka/webhooks", apiCfg.handlerPolkaWebhook)
+
 	// Start the HTTP server
 
 	log.Printf("Serving on port: %s\n", port)
@@ -536,6 +539,52 @@ func (cfg *apiConfig) handlerDeleteChirpByID(w http.ResponseWriter, r *http.Requ
 	err = cfg.dbQueries.DeleteChirpByID(r.Context(), chirpID)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to delete chirp")
+		return
+	}
+
+	respondWithStatusOnly(w, http.StatusNoContent)
+}
+
+// Handle Polka Webhook endpoint
+func (cfg *apiConfig) handlerPolkaWebhook(w http.ResponseWriter, r *http.Request) {
+
+	type PolkaWebhookPayload struct {
+		Event string `json:"event"`
+		Data  struct {
+			UserID string `json:"user_id"`
+		} `json:"data"`
+	}
+	var payload PolkaWebhookPayload
+
+	err := json.NewDecoder(r.Body).Decode(&payload)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid webhook payload")
+		return
+	}
+
+	// We only care about "user.upgraded" events for Chirpy Red
+	if payload.Event != "user.upgraded" {
+		respondWithStatusOnly(w, http.StatusNoContent)
+		return
+	}
+	log.Printf("Received Polka webhook: %+v", payload)
+
+	userID, err := uuid.Parse(payload.Data.UserID)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid user ID in webhook payload")
+		return
+	}
+
+	// Update user to set IsChirpyRed to true
+	_, err = cfg.dbQueries.UpdateUserChirpyRedStatus(r.Context(), database.UpdateUserChirpyRedStatusParams{
+		ID:          userID,
+		IsChirpyRed: true,
+	})
+	if err == sql.ErrNoRows {
+		respondWithError(w, http.StatusNotFound, "User not found")
+		return
+	} else if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to update user Chirpy Red status")
 		return
 	}
 
