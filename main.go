@@ -475,12 +475,45 @@ func (cfg *apiConfig) handlerCreateChirp(w http.ResponseWriter, r *http.Request)
 
 // Handle Get All Chirps endpoint
 func (cfg *apiConfig) handlerGetAllChirps(w http.ResponseWriter, r *http.Request) {
+	// Do we have a query param for sorting?
+	sortOrder := r.URL.Query().Get("sort")
+	if sortOrder == "" {
+		sortOrder = "asc"
+	}
+	// Do we have a query param for userID?
+	strAuthorId := r.URL.Query().Get("author_id")
+	if strAuthorId != "" {
+		authorID, err := uuid.Parse(strAuthorId)
+		if err != nil {
+			respondWithError(w, http.StatusBadRequest, "Invalid author_id")
+			return
+		}
+		chirps, err := cfg.dbQueries.GetChirpsByUserID(r.Context(), uuid.NullUUID{UUID: authorID, Valid: true})
+		if err != nil && err != sql.ErrNoRows {
+			respondWithError(w, http.StatusInternalServerError, "Failed to retrieve chirps")
+			return
+		}
+		if sortOrder == "desc" {
+			// Reverse the chirps slice
+			for i, j := 0, len(chirps)-1; i < j; i, j = i+1, j-1 {
+				chirps[i], chirps[j] = chirps[j], chirps[i]
+			}
+		}
+		respondWithJSON(w, http.StatusOK, chirps)
+		return
+	}
+
 	chirps, err := cfg.dbQueries.GetAllChirps(r.Context())
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to retrieve chirps")
 		return
 	}
-
+	if sortOrder == "desc" {
+		// Reverse the chirps slice
+		for i, j := 0, len(chirps)-1; i < j; i, j = i+1, j-1 {
+			chirps[i], chirps[j] = chirps[j], chirps[i]
+		}
+	}
 	respondWithJSON(w, http.StatusOK, chirps)
 }
 
