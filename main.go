@@ -154,6 +154,9 @@ func main() {
 	// Handle database user creation endpoint
 	mux.HandleFunc("POST /api/users", apiCfg.handlerCreateUser)
 
+	// Handle Update User endpoint
+	mux.HandleFunc("PUT /api/users", apiCfg.handlerUpdateUser)
+
 	// Handle Login endpoint
 	mux.HandleFunc("POST /api/login", apiCfg.handlerLogin)
 
@@ -172,8 +175,8 @@ func main() {
 	// Handle Get Chirp by ID endpoint
 	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.handlerGetChirpByID)
 
-	// Handle Update User endpoint
-	mux.HandleFunc("PUT /api/users", apiCfg.handlerUpdateUser)
+	// Handle Delete Chirp by ID endpoint
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.handlerDeleteChirpByID)
 
 	// Start the HTTP server
 
@@ -486,6 +489,57 @@ func (cfg *apiConfig) handlerGetChirpByID(w http.ResponseWriter, r *http.Request
 	}
 
 	respondWithJSON(w, http.StatusOK, chirp)
+}
+
+// Handle Delete Chirp by ID endpoint
+func (cfg *apiConfig) handlerDeleteChirpByID(w http.ResponseWriter, r *http.Request) {
+	// Get and validate the Authorization header
+	authToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Missing or invalid Authorization header")
+		return
+	}
+
+	// Validate the JWT token
+	userID, err := auth.ValidateJWT(authToken, cfg.jwtSigningKey)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Invalid or expired token")
+		return
+	}
+
+	// Get the chirp ID from the URL path
+	idStr := r.PathValue("chirpID")
+	chirpID, err := uuid.Parse(idStr)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid chirp ID")
+		return
+	}
+
+	// Check token for userid ownership of the chirp?
+
+	chirp, err := cfg.dbQueries.GetChirpByID(r.Context(), chirpID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			respondWithError(w, http.StatusNotFound, "Chirp not found")
+		} else {
+			respondWithError(w, http.StatusInternalServerError, "Failed to retrieve chirp")
+		}
+		return
+	}
+	if chirp.UserID.UUID != userID {
+		respondWithError(w, http.StatusForbidden, "You do not have permission to delete this chirp")
+		return
+	}
+
+	// Proceed to delete the chirp
+
+	err = cfg.dbQueries.DeleteChirpByID(r.Context(), chirpID)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to delete chirp")
+		return
+	}
+
+	respondWithStatusOnly(w, http.StatusNoContent)
 }
 
 func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
